@@ -29,6 +29,8 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
+
+	"cp_go_grpc/echo_serv/interceptor"
 )
 
 //Server grpc的服务器结构体
@@ -179,6 +181,14 @@ func (s *Server) TLSOpts() {
 	}
 }
 
+//RegistInterceptor 注册拦截器
+func (s *Server) RegistInterceptor() {
+	s.opts = append(s.opts,
+		grpc.UnaryInterceptor(interceptor.UnaryTimerInterceptor),
+		grpc.StreamInterceptor(interceptor.StreamTimerInterceptor),
+	)
+}
+
 //RunServer 启动服务
 func (s *Server) RunServer() {
 	lis, err := net.Listen("tcp", s.Address)
@@ -188,7 +198,7 @@ func (s *Server) RunServer() {
 	}
 	s.PerformanceOpts()
 	s.TLSOpts()
-
+	s.RegistInterceptor()
 	gs := grpc.NewServer(s.opts...)
 	defer gs.Stop()
 	// 注册健康检查
@@ -292,4 +302,11 @@ func (s *Server) Run() {
 		// serv.Stop()
 		wg.Wait()
 	}
+}
+
+var ServNode = Server{
+	App_Name:    "cp_go_grpc",
+	App_Version: "0.0.0",
+	Address:     "0.0.0.0:5000",
+	Log_Level:   "DEBUG",
 }

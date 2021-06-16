@@ -3,6 +3,7 @@ package echo_sdk
 import (
 	"context"
 	"cp_go_grpc/echo_pb"
+	"cp_go_grpc/echo_sdk/interceptor"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
@@ -103,7 +104,6 @@ func (c *SDK) InitCallOpts() {
 
 //InitOpts 初始化连接选项
 func (c *SDK) InitOpts() error {
-	c.opts = append(c.opts)
 	if c.Ca_Cert_Path != "" {
 		if c.Client_Cert_Path != "" && c.Client_Key_Path != "" {
 			cert, err := tls.LoadX509KeyPair(c.Client_Cert_Path, c.Client_Key_Path)
@@ -155,6 +155,13 @@ func (c *SDK) InitOpts() error {
 	return nil
 }
 
+//RegistInterceptor 注册拦截器
+func (c *SDK) RegistInterceptor() {
+	c.opts = append(c.opts, 
+		grpc.WithUnaryInterceptor(interceptor.UnaryTimerInterceptor), 
+		grpc.WithStreamInterceptor(interceptor.StreamTimerInterceptor))
+}
+
 //Init 初始化sdk客户端的连接信息
 func (c *SDK) Init(conf *SDKConfig) error {
 	c.SDKConfig = conf
@@ -195,6 +202,7 @@ func (c *SDK) Init(conf *SDKConfig) error {
 		}
 		c.opts = append(c.opts, grpc.WithDefaultServiceConfig(serviceconfig))
 	}
+	c.RegistInterceptor()
 	return nil
 }
 

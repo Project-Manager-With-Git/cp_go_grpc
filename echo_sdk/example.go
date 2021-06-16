@@ -5,7 +5,12 @@ import (
 	"cp_go_grpc/echo_pb"
 	"fmt"
 	"io"
-	"log"
+	"os"
+
+	log "github.com/Golang-Tools/loggerhelper"
+
+	grpc "google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 //Main 执行测试
@@ -14,24 +19,31 @@ func (c *SDKConfig) Main() {
 	sdk := c.NewSDK()
 	Conn, err := sdk.NewConn()
 	if err != nil {
-		fmt.Println(err)
-		return
+		log.Error("new comm get err", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
 	defer Conn.Close()
 	//req-res
 	ctx, cancel := sdk.NewCtx()
 	defer cancel()
-	req, err := Conn.Square(ctx, &echo_pb.Message{Message: 2.0})
+	md := metadata.Pairs("a", "1", "b", "2")
+	ctx_meta := metadata.NewOutgoingContext(ctx, md)
+	var header, trailer metadata.MD
+	req, err := Conn.Square(ctx_meta, &echo_pb.Message{Message: 2.0},
+		grpc.Header(&header),   // will retrieve header
+		grpc.Trailer(&trailer), // will retrieve trailer
+	)
 	if err != nil {
-		log.Fatalf("%v.Square get error %v", Conn, err)
-		return
+		log.Error("Square get error", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
-	fmt.Println(req)
+	log.Info("Square get result", log.Dict{"header": header, "req": req, "trailer": trailer})
+
 	//req-stream
 	ResStream, err := Conn.RangeSquare(context.Background(), &echo_pb.Message{Message: 4.0})
 	if err != nil {
-		log.Fatalf("%v.RangeSquare get error %v", Conn, err)
-		return
+		log.Error("RangeSquare get error", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
 	for {
 		feature, err := ResStream.Recv()
@@ -39,42 +51,61 @@ func (c *SDKConfig) Main() {
 			if err == io.EOF {
 				break
 			} else {
-				log.Fatalf("%v.RangeSquare(_) = _, %v", Conn, err)
+				log.Error("RangeSquare(_) = _", log.Dict{"err": err.Error()})
+				os.Exit(1)
 			}
 		}
-		log.Println(feature)
+		log.Info("RangeSquare get res", log.Dict{"res": feature})
 	}
 
 	//stream-res
 	ReqStream, err := Conn.SumSquare(context.Background())
 	if err != nil {
-		log.Fatalf("%v.SumSquare get error, %v", Conn, err)
+		log.Error("SumSquare get error", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
 	for i := 0; i < 5; i++ {
 		m := &echo_pb.Message{Message: float64(i)}
 		err := ReqStream.Send(m)
 		if err != nil {
-			log.Fatalf("%v.Send(%v) = %v", ReqStream, m, err)
+			log.Error("SumSquare Send() get err", log.Dict{"m": m, "err": err.Error()})
+			os.Exit(1)
 		}
 	}
 	reply, err := ReqStream.CloseAndRecv()
 	if err != nil {
-		log.Fatalf("%v.CloseAndRecv() got error %v, want %v", ReqStream, err, nil)
+		log.Error("ReqStream CloseAndRecv() got err", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
-	log.Printf("summary: %v", reply)
+	log.Info("ReqStream get summary", log.Dict{"reply": reply})
 
 	//stream-stream
-	ReqResStream, err := Conn.StreamrangeSquare(context.Background())
+	ctx_stream_meta := metadata.NewOutgoingContext(context.Background(), md)
+	ReqResStream, err := Conn.StreamrangeSquare(ctx_stream_meta)
 	if err != nil {
-		log.Fatalf("%v.StreamrangeSquare get error, %v", Conn, err)
+		log.Error("StreamrangeSquare get err", log.Dict{"err": err.Error()})
+		os.Exit(1)
 	}
+
+	// retrieve header
+	streamheader, err := ReqResStream.Header()
+	if err != nil {
+		log.Error("StreamrangeSquare get header get error", log.Dict{"err": err.Error()})
+		os.Exit(1)
+	}
+	log.Info("StreamrangeSquare get header", log.Dict{"header": streamheader})
 	go func() {
 		for i := 0; i < 5; i++ {
 			m := &echo_pb.Message{Message: float64(i)}
 			err := ReqResStream.Send(m)
 			if err != nil {
-				log.Fatalf("%v.Send(%v) = %v", ReqResStream, m, err)
+				log.Error("StreamrangeSquare Send get error", log.Dict{"m": m, "err": err.Error()})
+				os.Exit(1)
 			}
+		}
+		err := ReqResStream.CloseSend()
+		if err != nil {
+			log.Error("StreamrangeSquare CloseSend get error", log.Dict{"err": err.Error()})
 		}
 	}()
 	for {
@@ -83,9 +114,18 @@ func (c *SDKConfig) Main() {
 			if err == io.EOF {
 				break
 			} else {
-				log.Fatalf("%v.StreamrangeSquare(_) = _, %v", Conn, err)
+				log.Error("StreamrangeSquare get err", log.Dict{"err": err.Error()})
+				os.Exit(1)
 			}
 		}
-		log.Println(feature)
+		log.Info("StreamrangeSquare get result", log.Dict{"res": feature})
+
 	}
+	// retrieve trailer
+	streamtrailer := ReqResStream.Trailer()
+	log.Info("StreamrangeSquare get trailer", log.Dict{"trailer": streamtrailer})
+}
+
+var TestNode = SDKConfig{
+	Address: []string{"localhost:5000"},
 }

@@ -4,12 +4,21 @@ import (
 	"cp_go_grpc/echo_pb"
 	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io/ioutil"
 	"net"
 	"os"
+	"os/signal"
+	"strings"
+	sync "sync"
+	"syscall"
 	"time"
 
 	log "github.com/Golang-Tools/loggerhelper"
+
+	"github.com/liyue201/grpc-lb/common"
+	"github.com/liyue201/grpc-lb/registry"
+	zk "github.com/liyue201/grpc-lb/registry/zookeeper"
 
 	grpc "google.golang.org/grpc"
 	channelz "google.golang.org/grpc/channelz/service"
@@ -18,6 +27,7 @@ import (
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/reflection"
 
 	"cp_go_grpc/echo_serv/interceptor"
@@ -59,11 +69,17 @@ type Server struct {
 	Ca_Cert_Path     string `json:"ca_cert_path,omitempty" jsonschema:"description=使用TLS时根整数位置"`
 	Client_Crl_Path  string `json:"client_crl_path,omitempty" jsonschema:"description=客户端证书黑名单位置"`
 
+	// 本地负载均衡设置
+	Zookeeper_URL  []string `json:"zookeeper_url,omitempty" jsonschema:"description=负载均衡使用的zookeeper地址序列以逗号分隔"`
+	Balance_Weight string   `json:"balance_weight,omitempty" jsonschema:"description=负载均衡的权重"`
+
 	// 调试,目前admin接口不稳定,因此只使用channelz
 	Use_Admin bool `json:"use_admin,omitempty" jsonschema:"description=是否使用grpc-admin方便调试"`
 
 	opts          []grpc.ServerOption
+	service       *registry.ServiceInfo
 	healthservice *health.Server
+	registrar     *zk.Registrar
 }
 
 //Main 服务的入口函数
@@ -204,9 +220,88 @@ func (s *Server) RunServer() {
 	}
 }
 
+//RegistService 注册服务到zookeeper
+func (s *Server) RegistService() {
+	if s.registrar != nil && s.service != nil {
+		log.Warn("服务注册已经初始化")
+		return
+	}
+	port := strings.Split(s.Address, ":")[1]
+	addrs, err := net.InterfaceAddrs()
+
+	if err != nil {
+		log.Error("获取本地ip失败", log.Dict{"place": "RegistService", "err": err})
+		os.Exit(1)
+	}
+	ip := ""
+	for _, _ip := range addrs {
+		IP := _ip.String()
+		if strings.HasPrefix(IP, "172.16.1.") {
+			if strings.Contains(IP, "/") {
+				ip = strings.Split(IP, "/")[0]
+			} else {
+				ip = IP
+			}
+			break
+		}
+	}
+	if ip == "" {
+		log.Error("未找到ip", log.Dict{"place": "RegistService"})
+		os.Exit(1)
+	}
+	hostname, err := os.Hostname()
+	if err != nil {
+		log.Error("获取本地容器hostname失败", log.Dict{"place": "RegistService", "err": err})
+		os.Exit(1)
+	}
+	service := &registry.ServiceInfo{
+		InstanceId: hostname,
+		Name:       s.App_Name,
+		Version:    s.App_Version,
+		Address:    fmt.Sprintf("%s:%s", ip, port),
+		Metadata:   metadata.Pairs(common.WeightKey, s.Balance_Weight),
+	}
+	log.Info("注册的服务", log.Dict{"service": *service})
+	registrar, err := zk.NewRegistrar(
+		&zk.Config{
+			ZkServers:      s.Zookeeper_URL,
+			RegistryDir:    "/backend/services",
+			SessionTimeout: time.Second,
+		})
+	if err != nil {
+		log.Error("regist error", log.Dict{"err": err})
+		os.Exit(1)
+	}
+	s.registrar = registrar
+	s.service = service
+
+}
+
 //Run 执行grpc服务
 func (s *Server) Run() {
-	s.RunServer()
+	if len(s.Zookeeper_URL) == 0 || s.Zookeeper_URL == nil {
+		s.RunServer()
+	} else {
+		s.RegistService()
+		wg := sync.WaitGroup{}
+		wg.Add(1)
+		go func() {
+			s.RunServer()
+			wg.Done()
+		}()
+
+		wg.Add(1)
+		go func() {
+			s.registrar.Register(s.service)
+			wg.Done()
+		}()
+		signalChan := make(chan os.Signal, 1)
+		signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+		<-signalChan
+		s.registrar.Unregister(s.service)
+		// serv.Stop()
+		wg.Wait()
+	}
 }
 
 var ServNode = Server{

@@ -14,6 +14,8 @@ import (
 
 	log "github.com/Golang-Tools/loggerhelper"
 	jsoniter "github.com/json-iterator/go"
+	"github.com/liyue201/grpc-lb/balancer"
+	registry "github.com/liyue201/grpc-lb/registry/zookeeper"
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/encoding/gzip"
@@ -52,6 +54,9 @@ type SDKConfig struct {
 
 	// 请求超时设置
 	Query_Timeout int `json:"query_timeout,omitempty" jsonschema:"description=请求服务的最大超时时间单位ms"`
+
+	// 本地负载均衡
+	Balance_With_Zookeeper bool `json:"balance_with_zookeeper,omitempty" jsonschema:"description=是否使用zookeeper做本地负载均衡"`
 }
 
 //NewSDK 创建客户端对象
@@ -152,8 +157,8 @@ func (c *SDK) InitOpts() error {
 
 //RegistInterceptor 注册拦截器
 func (c *SDK) RegistInterceptor() {
-	c.opts = append(c.opts,
-		grpc.WithUnaryInterceptor(interceptor.UnaryTimerInterceptor),
+	c.opts = append(c.opts, 
+		grpc.WithUnaryInterceptor(interceptor.UnaryTimerInterceptor), 
 		grpc.WithStreamInterceptor(interceptor.StreamTimerInterceptor))
 }
 
@@ -170,11 +175,19 @@ func (c *SDK) Init(conf *SDKConfig) error {
 		}
 	case 1:
 		{
-			c.initStandalone()
+			if conf.Balance_With_Zookeeper {
+				c.initWithZooKeeperBalance()
+			} else {
+				c.initStandalone()
+			}
 		}
 	default:
 		{
-			c.initWithLocalBalance()
+			if conf.Balance_With_Zookeeper {
+				c.initWithZooKeeperBalance()
+			} else {
+				c.initWithLocalBalance()
+			}
 		}
 	}
 	err := c.InitOpts()
@@ -229,6 +242,14 @@ func (c *SDK) initWithLocalBalance() error {
 	})
 	c.addr = fmt.Sprintf("%s:///%s", r.Scheme(), serverName)
 	c.opts = append(c.opts, grpc.WithResolvers(r))
+	return nil
+}
+
+//InitWithZooKeeperBalance 初始zokeeper负载均衡的连接配置
+func (c *SDK) initWithZooKeeperBalance() error {
+	registry.RegisterResolver("zk", c.Address, "/backend/services", c.App_Name, c.App_Version)
+	c.addr = "zk:///"
+	c.opts = append(c.opts, grpc.WithBalancerName(balancer.RoundRobin))
 	return nil
 }
 

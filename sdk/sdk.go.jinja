@@ -196,6 +196,15 @@ func (c *SDK) Init(conf *SDKConfig) error {
 //InitStandalone 初始化单机服务的连接配置
 func (c *SDK) initStandalone() error {
 	c.addr = c.Address[0]
+	if strings.HasPrefix(c.addr, "dns:///") {
+		if c.serviceconfig == nil {
+			c.serviceconfig = map[string]interface{}{
+				"loadBalancingPolicy": "round_robin",
+			}
+		} else {
+			c.serviceconfig["loadBalancingPolicy"] = "round_robin"
+		}
+	}
 	return nil
 }
 

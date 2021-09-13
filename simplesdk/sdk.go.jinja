@@ -9,7 +9,6 @@ import (
 	"io/ioutil"
 	"strings"
 	"{{ app_name }}/{{ serv_name }}_pb"
-	"{{ app_name }}/{{ serv_name }}_sdk/interceptor"
 	"time"
 
 	log "github.com/Golang-Tools/loggerhelper"
@@ -130,13 +129,6 @@ func (c *SDK) initPerformanceOpts() {
 	}
 }
 
-//RegistInterceptor 注册拦截器
-func (c *SDK) RegistInterceptor() {
-	c.opts = append(c.opts,
-		grpc.WithUnaryInterceptor(interceptor.UnaryTimerInterceptor),
-		grpc.WithStreamInterceptor(interceptor.StreamTimerInterceptor))
-}
-
 //Init 初始化sdk客户端的连接信息
 func (c *SDK) Init(conf *SDKConfig) error {
 	c.SDKConfig = conf
@@ -180,7 +172,6 @@ func (c *SDK) Init(conf *SDKConfig) error {
 	c.initCompression()
 	c.initKeepalive()
 	c.initPerformanceOpts()
-	c.RegistInterceptor()
 	if len(c.serviceconfig) != 0 {
 		serviceconfig, err := json.MarshalToString(c.serviceconfig)
 		if err != nil {

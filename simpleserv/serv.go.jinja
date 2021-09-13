@@ -27,7 +27,6 @@ import (
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/xds"
 
-	"{{ app_name }}/{{ serv_name }}_serv/interceptor"
 )
 
 //Server grpc的服务器结构体
@@ -175,16 +174,6 @@ func (s *Server) TLSOpts() {
 	log.Info("server will start use TLS")
 }
 
-//RegistInterceptor 注册拦截器
-func (s *Server) RegistInterceptor() {
-	if s.opts == nil {
-		s.opts = []grpc.ServerOption{}
-	}
-	s.opts = append(s.opts,
-		grpc.UnaryInterceptor(interceptor.UnaryTimerInterceptor),
-		grpc.StreamInterceptor(interceptor.StreamTimerInterceptor),
-	)
-}
 
 //RunServer 启动服务
 func (s *Server) RunServer() {
@@ -254,7 +243,6 @@ func (s *Server) RunServer() {
 		if s.Server_Cert_Path != "" && s.Server_Key_Path != "" {
 			s.TLSOpts()
 		}
-		s.RegistInterceptor()
 		gs := grpc.NewServer(s.opts...)
 		defer gs.Stop()
 		// 注册健康检查

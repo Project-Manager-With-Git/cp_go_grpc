@@ -86,7 +86,7 @@ func (s *Server) Main() {
 	// 初始化log
 	log.Init(log.WithLevel(s.Log_Level),
 		log.AddExtField("app_name", s.App_Name),
-		log.AddExtField("app_version", s.App_Version)
+		log.AddExtField("app_version", s.App_Version),
 	)
 	log.Info("grpc服务获得参数",log.Dict{"ServiceConfig": s})
 	/**

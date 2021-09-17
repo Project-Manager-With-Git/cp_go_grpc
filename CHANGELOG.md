@@ -12,6 +12,7 @@
 ## 更新组件
 
 1. sdk和simplesdk的`NewCtx()`方法增加参数opt可以进行扩展添加元数据
+2. sdk和simplesdk的`NewCtx()`方法现在也可以为流请求提供上下文
 
 ## 修复bug
 

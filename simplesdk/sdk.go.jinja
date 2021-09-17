@@ -285,7 +285,6 @@ type Conn struct {
 	{{ serv_name }}_pb.{{ serv_name | upper }}Client
 	conn *grpc.ClientConn
 	sdk  *SDK
-	once bool
 }
 
 func newConn(sdk *SDK, addr string, opts ...grpc.DialOption) (*Conn, error) {
@@ -300,12 +299,22 @@ func newConn(sdk *SDK, addr string, opts ...grpc.DialOption) (*Conn, error) {
 	return c, nil
 }
 
-func (c *Conn) NewCtx() (ctx context.Context, cancel context.CancelFunc) {
-	if c.sdk.SDKConfig.Query_Timeout > 0 {
+//NewCtx 用于构造请求时的上下文信息,这个上下问可以带元数据信息
+func (c *Conn) NewCtx(opts ...CtxOption) (ctx context.Context, cancel context.CancelFunc) {
+	dopt := DefaultCtxOpts
+	if len(opts) > 0 {
+		for _, opt := range opts {
+			opt.Apply(&dopt)
+		}
+	}
+	if dopt.IsStream || c.sdk.SDKConfig.Query_Timeout <= 0 {
+		ctx, cancel = context.WithCancel(context.Background())
+	} else {
 		timeout := time.Duration(c.sdk.SDKConfig.Query_Timeout) * time.Millisecond
 		ctx, cancel = context.WithTimeout(context.Background(), timeout)
-	} else {
-		ctx, cancel = context.WithCancel(context.Background())
+	}
+	if len(dopt.MetaData) > 0 {
+		ctx = metadata.NewOutgoingContext(ctx, dopt.MetaData)
 	}
 	return
 }

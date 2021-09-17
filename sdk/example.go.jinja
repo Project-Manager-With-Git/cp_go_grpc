@@ -3,7 +3,6 @@ package {{ serv_name }}_sdk
 import (
 	"context"
 	"{{ app_name }}/{{ serv_name }}_pb"
-	"fmt"
 	"io"
 	"os"
 
@@ -15,7 +14,7 @@ import (
 
 //Main 执行测试
 func (c *SDKConfig) Main() {
-	log.Info(log.Dict{"sdk test start","config":c})
+	log.Info("sdk test start", log.Dict{"config": c})
 	sdk := c.NewSDK()
 	Conn, err := sdk.NewConn()
 	if err != nil {
@@ -24,12 +23,10 @@ func (c *SDKConfig) Main() {
 	}
 	defer Conn.Close()
 	//req-res
-	ctx, cancel := Conn.NewCtx()
+	ctx, cancel := Conn.NewCtx(Conn.WithRequestMeta(), WithMeta("a", "1"), WithMeta("b", "2"))
 	defer cancel()
-	md := metadata.Pairs("a", "1", "b", "2")
-	ctx_meta := metadata.NewOutgoingContext(ctx, md)
 	var header, trailer metadata.MD
-	req, err := Conn.Square(ctx_meta, &{{ serv_name }}_pb.Message{Message: 2.0},
+	req, err := Conn.Square(ctx, &{{ serv_name }}_pb.Message{Message: 2.0},
 		grpc.Header(&header),   // will retrieve header
 		grpc.Trailer(&trailer), // will retrieve trailer
 	)
@@ -80,8 +77,9 @@ func (c *SDKConfig) Main() {
 	log.Info("ReqStream get summary", log.Dict{"reply": reply})
 
 	//stream-stream
-	ctx_stream_meta := metadata.NewOutgoingContext(context.Background(), md)
-	ReqResStream, err := Conn.StreamrangeSquare(ctx_stream_meta)
+	sctx, scancel := Conn.NewCtx(Conn.WithRequestMeta(), WithMeta("a", "1"), WithMeta("b", "2"), IsStream())
+	defer scancel()
+	ReqResStream, err := Conn.StreamrangeSquare(sctx)
 	if err != nil {
 		log.Error("StreamrangeSquare get err", log.Dict{"err": err.Error()})
 		os.Exit(1)
@@ -127,5 +125,5 @@ func (c *SDKConfig) Main() {
 }
 
 var TestNode = SDKConfig{
-	Address: []string{"localhost:5000"},
+	Query_Addresses: []string{"localhost:5000"},
 }

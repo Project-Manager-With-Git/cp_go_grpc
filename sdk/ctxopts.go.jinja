@@ -1,0 +1,67 @@
+package {{ serv_name }}_sdk
+
+import (
+	"google.golang.org/grpc/metadata"
+)
+
+//CtxOptions 设置ctx行为的选项
+type CtxOptions struct {
+	IsStream bool
+	MetaData metadata.MD
+}
+
+var DefaultCtxOpts = CtxOptions{
+	MetaData: metadata.MD{},
+}
+
+// CtxOption configures how we set up the connection.
+type CtxOption interface {
+	Apply(*CtxOptions)
+}
+
+// func (emptyOption) apply(*Options) {}
+type funcCtxOption struct {
+	f func(*CtxOptions)
+}
+
+func (fo *funcCtxOption) Apply(do *CtxOptions) {
+	fo.f(do)
+}
+
+func newFuncCtxOption(f func(*CtxOptions)) *funcCtxOption {
+	return &funcCtxOption{
+		f: f,
+	}
+}
+
+//WithRequestMeta NewCtx方法的参数,用于设置请求信息到meta数据
+func (c *Conn) WithRequestMeta() CtxOption {
+	return newFuncCtxOption(func(o *CtxOptions) {
+		if o.MetaData == nil {
+			o.MetaData = metadata.MD{}
+		}
+		if c.sdk.Requester_App_Name != "" {
+			o.MetaData.Set("requester_app_name", c.sdk.Requester_App_Name)
+		}
+		if c.sdk.Requester_App_Version != "" {
+			o.MetaData.Set("requester_app_version", c.sdk.Requester_App_Version)
+		}
+	})
+}
+
+//WithMeta NewCtx方法的参数,用于设置信息到meta数据
+func WithMeta(key string, value ...string) CtxOption {
+	return newFuncCtxOption(func(o *CtxOptions) {
+		if o.MetaData == nil {
+			o.MetaData = metadata.MD{}
+		}
+		o.MetaData.Set(key, value...)
+	})
+}
+
+//IsStream NewCtx方法的参数,用于设置ctx为流请求使用
+func IsStream() CtxOption {
+	return newFuncCtxOption(func(o *CtxOptions) {
+		o.IsStream = true
+	})
+}

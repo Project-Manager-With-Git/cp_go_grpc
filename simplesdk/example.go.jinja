@@ -125,5 +125,6 @@ func (c *SDKConfig) Main() {
 }
 
 var TestNode = SDKConfig{
-	Address: []string{"localhost:5000"},
+	Query_Addresses:    []string{"localhost:5000"},
+	Requester_App_Name: "{{ app_name }}",
 }

@@ -42,9 +42,9 @@ func (c *Conn) WithRequestMeta() CtxOption {
 		}
 		if c.sdk.Requester_App_Name != "" {
 			o.MetaData.Set("requester_app_name", c.sdk.Requester_App_Name)
-		}
-		if c.sdk.Requester_App_Version != "" {
-			o.MetaData.Set("requester_app_version", c.sdk.Requester_App_Version)
+			if c.sdk.Requester_App_Version != "" {
+				o.MetaData.Set("requester_app_version", c.sdk.Requester_App_Version)
+			}
 		}
 	})
 }

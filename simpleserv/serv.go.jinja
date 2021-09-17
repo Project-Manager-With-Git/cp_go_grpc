@@ -37,10 +37,10 @@ import (
 //TLS支持
 //keep alive 支持
 type Server struct {
-	App_Name    string `json:"app_name,omitempty" jsonschema:"description=服务名"`
+	App_Name    string `json:"app_name,omitempty" jsonschema:"required,description=服务名"`
 	App_Version string `json:"app_version,omitempty" jsonschema:"description=服务版本"`
-	Address     string `json:"address,omitempty" jsonschema:"description=服务的主机和端口"`
-	Log_Level   string `json:"log_level,omitempty" jsonschema:"description=项目的log等级,enum=TRACE,enum=DEBUG,enum=INFO,enum=WARN,enum=ERROR"`
+	Address     string `json:"address,omitempty" jsonschema:"required,description=服务的主机和端口"`
+	Log_Level   string `json:"log_level,omitempty" jsonschema:"required,description=项目的log等级,enum=TRACE,enum=DEBUG,enum=INFO,enum=WARN,enum=ERROR"`
 
 	// 性能设置
 	Max_Recv_Msg_Size                           int  `json:"max_recv_msg_size,omitempty" jsonschema:"description=允许接收的最大消息长度"`
@@ -66,7 +66,11 @@ type Server struct {
 	XDS       bool `json:"xds,omitempty" jsonschema:"description=是否使用xDSAPIs"`
 	XDS_CREDS bool `json:"xds_creds,omitempty" jsonschema:"description=是否使用xDSAPIs来接收TLS设置"`
 
-	testmore_pb.Unimplemented{{ serv_name | upper }}Server `json:"-"`
+	/**
+	在这里补充其他配置项(注意去掉注释)
+	*/
+
+	{{ serv_name }}_pb.Unimplemented{{ serv_name | upper }}Server `json:"-"`
 	opts                                    []grpc.ServerOption
 	healthservice                           *health.Server
 }
@@ -74,11 +78,14 @@ type Server struct {
 //Main 服务的入口函数
 func (s *Server) Main() {
 	// 初始化log
-	log.Init(s.Log_Level, log.Dict{
-		"app_name":    s.App_Name,
-		"app_version": s.App_Version,
-	})
-	log.Info("获得参数", nil, log.Dict{"ServiceConfig": s}, nil)
+	log.Init(log.WithLevel(s.Log_Level),
+		log.AddExtField("app_name", s.App_Name),
+		log.AddExtField("app_version", s.App_Version)
+	)
+	log.Info("grpc服务获得参数",log.Dict{"ServiceConfig": s})
+	/**
+	在这里补充其他初始化项(注意去掉注释)
+	*/
 	s.Run()
 }
 
@@ -267,7 +274,7 @@ func (s *Server) Run() {
 
 var ServNode = Server{
 	App_Name:    "{{ app_name }}",
-	App_Version: "0.0.0",
+	App_Version: "0.0.1",
 	Address:     "0.0.0.0:5000",
 	Log_Level:   "DEBUG",
 }

@@ -1,3 +1,22 @@
+# v0.0.3
+
+## 细节优化
+
+1. 为要扩展的位置增加注释
+2. 明确必填项
+3. 更新`github.com/Golang-Tools/loggerhelper`版本
+4. 删除无用字段
+5. sdk和simplesdk的配置项`app_name`和`app_version`改名为`requester_app_name`和`requester_app_version`以明确含义
+6. sdk和simplesdk的配置项`address`改名为`query_addresses`以明确含义
+
+## 更新组件
+
+1. sdk和simplesdk的`NewCtx()`方法增加参数opt可以进行扩展添加元数据
+
+## 修复bug
+
+修复服务端一处引用bug
+
 # v0.0.2
 
 ## 更新组件
@@ -28,4 +47,3 @@
 | `serv`           | grpc的服务端模板           |
 | `main`           | 入口文件                   |
 | `service_schema` | 项目定义service的proto文件 |
-

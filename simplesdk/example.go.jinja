@@ -15,7 +15,7 @@ import (
 
 //Main 执行测试
 func (c *SDKConfig) Main() {
-	fmt.Println(c)
+	log.Info(log.Dict{"sdk test start","config":c})
 	sdk := c.NewSDK()
 	Conn, err := sdk.NewConn()
 	if err != nil {

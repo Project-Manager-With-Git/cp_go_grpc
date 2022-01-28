@@ -16,7 +16,7 @@ import (
 	log "github.com/Golang-Tools/loggerhelper"
 
 	grpc "google.golang.org/grpc"
-	channelz "google.golang.org/grpc/channelz/service"
+	"google.golang.org/grpc/admin"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	xdscreds "google.golang.org/grpc/credentials/xds"
@@ -68,6 +68,7 @@ type Server struct {
 	//使用XDS
 	XDS       bool `json:"xds,omitempty" jsonschema:"description=是否使用xDSAPIs"`
 	XDS_CREDS bool `json:"xds_creds,omitempty" jsonschema:"description=是否使用xDSAPIs来接收TLS设置"`
+	XDS_Maintenance_Port int  `json:"xds_maintenance_port,omitempty" jsonschema:"description=maintenance服务的端口如果不设置则使用当前服务端口+1"`
 
 	// 调试,目前admin接口不稳定,因此只使用channelz
 	Use_Admin bool `json:"use_admin,omitempty" jsonschema:"description=是否使用grpc-admin方便调试"`
@@ -191,104 +192,148 @@ func (s *Server) RegistInterceptor() {
 	)
 }
 
-//RunServer 启动服务
-func (s *Server) RunServer() {
+func doNothing() {
+	log.Debug("Do nothing")
+}
+
+
+//RegistTools 为指定服务注册各种工具
+func (s *Server) RegistTools(serv *grpc.Server) func() {
+
+	// 注册健康检查
+	s.healthservice = health.NewServer()
+	s.healthservice.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
+	healthpb.RegisterHealthServer(serv, s.healthservice)
+
+	// 注册反射
+	reflection.Register(serv)
+	// 注册grpc admin
+	if s.Use_Admin {
+		cleanup, err := admin.Register(serv)
+		if err != nil {
+			log.Warn("set grpc admin error", log.Dict{"err": err.Error()})
+			return doNothing
+		}
+		return cleanup
+	}
+	return doNothing
+}
+
+//RunXdsServer 启动xds服务服务
+func (s *Server) RunXdsServer() {
 	lis, err := net.Listen("tcp", s.Address)
 	if err != nil {
 		log.Error("Failed to Listen", log.Dict{"error": err.Error(), "address": s.Address})
 		os.Exit(1)
 	}
-	s.PerformanceOpts()
-	if s.XDS {
-		// 注意目前的XDS模式不支持反射,且健康监测不能和服务主体在同一个接口(现在默认为服务端口号+1)
-		creds := insecure.NewCredentials()
+	hostinfo := strings.Split(s.Address, ":")
+	if len(hostinfo) != 2 {
+		log.Error("address format not ok", log.Dict{"address": s.Address})
+		os.Exit(2)
+	}
+	port, err := strconv.Atoi(hostinfo[1])
+	if err != nil {
+		log.Error("address port not int", log.Dict{"address": s.Address})
+		os.Exit(2)
+	}
+	mantenancePort := port + 1
+	if s.XDS_Maintenance_Port > 0 && s.XDS_Maintenance_Port != port {
+		mantenancePort = s.XDS_Maintenance_Port
+	}
+	mantenanceAddress := fmt.Sprintf("%s:%d", hostinfo[0], mantenancePort)
+	mantenanceLis, err := net.Listen("tcp4", mantenanceAddress)
+	if err != nil {
+		log.Error("Mantenance Service Failed to Listen", log.Dict{"error": err.Error(), "address": mantenanceAddress})
+		os.Exit(1)
+	}
+	maintenanceServer := grpc.NewServer()
+	cleanup := s.RegistTools(maintenanceServer)
+	defer cleanup()
+
+	creds := insecure.NewCredentials()
+	if s.XDS_CREDS {
 		var err error
-		if s.XDS_CREDS {
-			creds, err = xdscreds.NewServerCredentials(xdscreds.ServerOptions{FallbackCreds: insecure.NewCredentials()})
-		}
+		creds, err = xdscreds.NewServerCredentials(xdscreds.ServerOptions{FallbackCreds: insecure.NewCredentials()})
 		if err != nil {
 			log.Error("failed to create server-side xDS credentials", log.Dict{"error": err.Error()})
 			os.Exit(2)
 		}
-		s.opts = append(s.opts, grpc.Creds(creds))
-		log.Info("server will start use XDS_CREDS")
-		gs := xds.NewGRPCServer(s.opts...)
-		defer gs.Stop()
-		{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
-		// 注册健康检查
-		hostinfo := strings.Split(s.Address, ":")
-		if len(hostinfo) != 2 {
-			log.Error("address format not ok", log.Dict{"address": s.Address})
-			os.Exit(2)
-		}
-		port, err := strconv.Atoi(hostinfo[1])
-		if err != nil {
-			log.Error("address port not int", log.Dict{"address": s.Address})
-			os.Exit(2)
-		}
-		healthaddress := fmt.Sprintf("%s:%d", hostinfo[0], port+1)
-		healthLis, err := net.Listen("tcp4", healthaddress)
-		if err != nil {
-			log.Error("Health Service Failed to Listen", log.Dict{"error": err.Error(), "address": healthaddress})
-			os.Exit(1)
-		}
-		healthServer := grpc.NewServer()
-		s.healthservice = health.NewServer()
-		s.healthservice.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-		healthpb.RegisterHealthServer(healthServer, s.healthservice)
-		// 无法注册反射
+	}
+	s.opts = append(s.opts, grpc.Creds(creds))
+	log.Info("server will start use XDS_CREDS")
+	gs := xds.NewGRPCServer(s.opts...)
+	defer gs.Stop()
 
-		// 启动服务
-		log.Info("Server Start", log.Dict{"address": s.Address, "health_service_addres": healthaddress})
-		go func() {
-			err := gs.Serve(lis)
-			if err != nil {
-				log.Error("Failed to Serve", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		go healthServer.Serve(healthLis)
-		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
-		quit := make(chan os.Signal, 3)
-		signal.Notify(quit, os.Interrupt)
-		<-quit
-		log.Info("Shutdown Server ...")
-		gs.GracefulStop()
-		healthServer.GracefulStop()
-	} else {
-		if s.Server_Cert_Path != "" && s.Server_Key_Path != "" {
-			s.TLSOpts()
-		}
-		s.RegistInterceptor()
-		gs := grpc.NewServer(s.opts...)
-		defer gs.Stop()
-		// 注册健康检查
-		s.healthservice = health.NewServer()
-		s.healthservice.SetServingStatus("", healthpb.HealthCheckResponse_SERVING)
-		healthpb.RegisterHealthServer(gs, s.healthservice)
+	// 注册服务
+	{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
 
-		// 注册反射
-		reflection.Register(gs)
-		if s.Use_Admin {
-			channelz.RegisterChannelzServiceToServer(gs)
-		}
-		// 注册服务
-		{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
-
-		// 启动服务
-		log.Info("Server Start", log.Dict{"address": s.Address})
-		err = gs.Serve(lis)
+	// 启动服务
+	log.Info("Server Start", log.Dict{"address": s.Address, "mantenance_port": mantenancePort})
+	go func() {
+		err := gs.Serve(lis)
 		if err != nil {
 			log.Error("Failed to Serve", log.Dict{"error": err})
 			os.Exit(1)
 		}
+	}()
+	go func() {
+		err := maintenanceServer.Serve(mantenanceLis)
+		if err != nil {
+			log.Error("Failed to Start Maintenance Server", log.Dict{"error": err})
+			os.Exit(1)
+		}
+	}()
+	// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
+	quit := make(chan os.Signal, 3)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Info("Shutdown Server ...")
+	gs.GracefulStop()
+	maintenanceServer.GracefulStop()
+}
+
+//RunCommonServer 启动常规服务服务
+func (s *Server) RunCommonServer() {
+	lis, err := net.Listen("tcp", s.Address)
+	if err != nil {
+		log.Error("Failed to Listen", log.Dict{"error": err.Error(), "address": s.Address})
+		os.Exit(1)
+	}
+	if s.Server_Cert_Path != "" && s.Server_Key_Path != "" {
+		s.TLSOpts()
+	}
+	gs := grpc.NewServer(s.opts...)
+	defer gs.Stop()
+	cleanup := s.RegistTools(gs)
+	defer cleanup()
+
+	// 注册服务
+	{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
+
+	// 启动服务
+	log.Info("Server Start", log.Dict{"address": s.Address})
+	err = gs.Serve(lis)
+	if err != nil {
+		log.Error("Failed to Serve", log.Dict{"error": err})
+		os.Exit(1)
 	}
 }
 
 //Run 执行grpc服务
 func (s *Server) Run() {
-	s.RunServer()
+	// 注册grpc的配置
+	s.PerformanceOpts()
+	// 注册拦截器
+	s.RegistInterceptor()
+	if s.XDS {
+		log.Info("setup as xds serv")
+		s.RunXdsServer()
+	} else {
+		log.Info("set up as common serv")
+		s.RunCommonServer()
+	}
 }
+
 
 var ServNode = Server{
 	App_Name:    "{{ app_name }}",

@@ -1,0 +1,66 @@
+{
+    "language": "go",
+    "env": "gomod",
+    "description": "go语言grpc服务和sdk的组件库.",
+    "author": "hsz",
+    "template_type": "components",
+    "requires": [
+        "github.com/Golang-Tools/loggerhelper@v0.0.4",
+        "github.com/Golang-Tools/schema-entry-go@v0.0.5",
+        "github.com/json-iterator/go@v1.1.12",
+        "google.golang.org/grpc@v1.40.0"
+
+    ],
+    "template_keys": {
+        "serv_name": {
+            "description": "定义service的名字",
+            "default": "{{ project_name }}"
+        },
+        "app_name": {
+            "description": "定义app的名字",
+            "default": "{{ project_name }}"
+        }
+    },
+    "components": {
+        "sdk": {
+            "source": "sdk",
+            "description": "grpc的客户端sdk模板",
+            "default_path": "{{ serv_name }}_sdk"
+        },
+        "serv": {
+            "source": "serv",
+            "description": "grpc的服务端模板",
+            "default_path": "{{ serv_name }}_serv"
+        },
+        "simplesdk": {
+            "source": "simplesdk",
+            "description": "grpc的去掉拦截器的简化版客户端sdk模板",
+            "default_path": "{{ serv_name }}_sdk"
+        },
+        "simpleserv": {
+            "source": "simpleserv",
+            "description": "grpc的去掉拦截器的服务端模板",
+            "default_path": "{{ serv_name }}_serv"
+        },
+        "sdkinterceptor": {
+            "source": "sdk/interceptor",
+            "description": "grpc的客户端拦截器模板",
+            "default_path": "{{ serv_name }}_sdk/interceptor"
+        },
+        "servinterceptor": {
+            "source": "serv/interceptor",
+            "description": "grpc的服务端拦截器模板",
+            "default_path": "{{ serv_name }}_serv/interceptor"
+        },
+        "main": {
+            "source": "main.go.jinja",
+            "description": "入口文件",
+            "default_path": "main.go"
+        },
+        "service_schema": {
+            "source": "pbschema/echo.proto.jinja",
+            "description": "项目定义service的proto文件",
+            "default_path": "pbschema/{{ serv_name }}.proto"
+        }
+    }
+}

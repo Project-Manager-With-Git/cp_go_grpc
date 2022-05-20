@@ -13,7 +13,7 @@ import (
 	"{{ app_name }}/{{ serv_name }}_pb"
 	"time"
 
-	log "github.com/Golang-Tools/loggerhelper"
+	log "github.com/Golang-Tools/loggerhelper/v2"
 
 	grpc "google.golang.org/grpc"
 	"google.golang.org/grpc/admin"
@@ -85,7 +85,7 @@ type Server struct {
 //Main 服务的入口函数
 func (s *Server) Main() {
 	// 初始化log
-	log.Init(log.WithLevel(s.Log_Level),
+	log.Set(log.WithLevel(s.Log_Level),
 		log.AddExtField("app_name", s.App_Name),
 		log.AddExtField("app_version", s.App_Version),
 	)

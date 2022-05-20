@@ -26,8 +26,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/xds"
-
-	"{{ app_name }}/{{ serv_name }}_serv/interceptor"
 )
 
 //Server grpc的服务器结构体
@@ -40,10 +38,10 @@ import (
 //TLS支持
 //keep alive 支持
 type Server struct {
-	App_Name    string `json:"app_name,omitempty" jsonschema:"required,description=服务名"`
-	App_Version string `json:"app_version,omitempty" jsonschema:"required,description=服务版本"`
-	Address     string `json:"address,omitempty" jsonschema:"required,description=服务的主机和端口"`
-	Log_Level   string `json:"log_level,omitempty" jsonschema:"required,description=项目的log等级,enum=TRACE,enum=DEBUG,enum=INFO,enum=WARN,enum=ERROR"`
+	App_Name    string `json:"app_name,omitempty" jsonschema:"required,description=服务名,default={{ app_name }}"`
+	App_Version string `json:"app_version,omitempty" jsonschema:"required,description=服务版本,default=0.0.1"`
+	Address     string `json:"address,omitempty" jsonschema:"required,description=服务的主机和端口,default=0.0.0.0:5000"`
+	Log_Level   string `json:"log_level,omitempty" jsonschema:"required,description=项目的log等级,enum=TRACE,enum=DEBUG,enum=INFO,enum=WARN,enum=ERROR,default=DEBUG"`
 
 	// 性能设置
 	Max_Recv_Msg_Size                           int  `json:"max_recv_msg_size,omitempty" jsonschema:"description=允许接收的最大消息长度"`
@@ -73,6 +71,8 @@ type Server struct {
 	// 调试,目前admin接口不稳定,因此只使用channelz
 	Use_Admin bool `json:"use_admin,omitempty" jsonschema:"description=是否使用grpc-admin方便调试"`
 
+	UnaryInterceptors  []grpc.UnaryServerInterceptor  `json:"-" jsonschema:"nullable"`
+	StreamInterceptors []grpc.StreamServerInterceptor `json:"-" jsonschema:"nullable"`
 	/**
 	在这里补充其他配置项(注意去掉注释)
 	*/
@@ -179,17 +179,6 @@ func (s *Server) TLSOpts() {
 		s.opts = append(s.opts, grpc.Creds(creds))
 	}
 	log.Info("server will start use TLS")
-}
-
-//RegistInterceptor 注册拦截器
-func (s *Server) RegistInterceptor() {
-	if s.opts == nil {
-		s.opts = []grpc.ServerOption{}
-	}
-	s.opts = append(s.opts,
-		grpc.UnaryInterceptor(interceptor.UnaryTimerInterceptor),
-		grpc.StreamInterceptor(interceptor.StreamTimerInterceptor),
-	)
 }
 
 func doNothing() {
@@ -319,6 +308,23 @@ func (s *Server) RunCommonServer() {
 	}
 }
 
+//RegistInterceptor 注册拦截器
+func (s *Server) RegistInterceptor() {
+	if s.opts == nil {
+		s.opts = []grpc.ServerOption{}
+	}
+	if len(s.UnaryInterceptors) > 0 {
+		for _, i := range s.UnaryInterceptors {
+			s.opts = append(s.opts, grpc.UnaryInterceptor(i))
+		}
+	}
+	if len(s.StreamInterceptors) > 0 {
+		for _, i := range s.StreamInterceptors {
+			s.opts = append(s.opts, grpc.StreamInterceptor(i))
+		}
+	}
+}
+
 //Run 执行grpc服务
 func (s *Server) Run() {
 	// 注册grpc的配置
@@ -332,12 +338,4 @@ func (s *Server) Run() {
 		log.Info("set up as common serv")
 		s.RunCommonServer()
 	}
-}
-
-
-var ServNode = Server{
-	App_Name:    "{{ app_name }}",
-	App_Version: "0.0.1",
-	Address:     "0.0.0.0:5000",
-	Log_Level:   "DEBUG",
 }

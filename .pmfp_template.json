@@ -68,7 +68,7 @@
         },
         "simple_serv": {
             "source": "simplefy/serv.go",
-            "description": "grpc的服务端模板",
+            "description": "grpc不含gateway的的服务端模板",
             "default_path": "{{ serv_name }}_serv/serv.go"
         },
         "servinterceptor": {

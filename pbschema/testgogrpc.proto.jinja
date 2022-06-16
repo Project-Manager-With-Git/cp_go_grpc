@@ -1,0 +1,65 @@
+syntax = "proto3";
+package {{ serv_name }};
+import "google/api/annotations.proto";
+import "protoc-gen-openapiv2/options/annotations.proto";
+// import "google/api/httpbody.proto";
+option go_package = "./{{ serv_name }}_pb";
+option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_swagger) = {
+    info: {
+      title: "{{ serv_name }}";
+      version: "{{ version }}";
+      contact: {
+        name: "test";
+        url: "https://github.com/grpc-ecosystem/grpc-gateway";
+        email: "none@example.com";
+      };
+    };
+    schemes: HTTP;
+    schemes: HTTPS;
+    schemes: WSS;
+    consumes: "application/json";
+    consumes: "application/x-foo-mime";
+    produces: "application/json";
+    produces: "application/x-foo-mime";
+  };
+  
+service {{ serv_name | upper }} {
+    rpc Square (Message) returns (Message){
+        option (google.api.http) = {
+			post: "/api/square"
+            body: "*"
+		};
+    }
+    rpc RangeSquare (Message) returns (stream Message){
+        option (google.api.http) = {
+			post: "/download/range_square"
+            body: "*"
+		};
+    }
+    rpc SumSquare (stream Message) returns (Message){
+        option (google.api.http) = {
+			post: "/stream/sum_square"
+            body: "*"
+		};
+    }
+    rpc StreamrangeSquare (stream Message) returns (stream Message){
+        option (google.api.http) = {
+			post: "/stream/range_square"
+            body: "*"
+		};
+    }
+}
+message Message {
+    option (grpc.gateway.protoc_gen_openapiv2.options.openapiv2_schema) = {
+        json_schema: {
+            title: "message"
+            description: "a message."
+
+            required: ["Message"]
+        }
+        example: "{\"Message\": 1.23}"
+    };
+    double Message = 1[(grpc.gateway.protoc_gen_openapiv2.options.openapiv2_field) = {
+        description: "The message field."
+    }];
+}

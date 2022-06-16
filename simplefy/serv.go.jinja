@@ -1,7 +1,6 @@
 package {{ serv_name }}_serv
 
 import (
-	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -27,20 +26,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/reflection"
 	"google.golang.org/grpc/xds"
-
-	"net/http"
-
-	_ "embed"
-
-	"github.com/felixge/httpsnoop"
-	"github.com/flowchartsman/swaggerui"
-	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
-	"github.com/soheilhy/cmux"
 )
-
-//这边需要指定文件位置
-//go:embed {{ serv_name }}.swagger.json
-var spec []byte
 
 //Server grpc的服务器结构体
 //服务集成了如下特性:
@@ -53,7 +39,7 @@ var spec []byte
 //keep alive 支持
 type Server struct {
 	App_Name    string `json:"app_name,omitempty" jsonschema:"required,description=服务名,default={{ app_name }}"`
-	App_Version string `json:"app_version,omitempty" jsonschema:"required,description=服务版本,default={{ version }}"`
+	App_Version string `json:"app_version,omitempty" jsonschema:"required,description=服务版本,default=0.0.1"`
 	Address     string `json:"address,omitempty" jsonschema:"required,description=服务的主机和端口,default=0.0.0.0:5000"`
 	Log_Level   string `json:"log_level,omitempty" jsonschema:"required,description=项目的log等级,enum=TRACE,enum=DEBUG,enum=INFO,enum=WARN,enum=ERROR,default=DEBUG"`
 
@@ -74,12 +60,12 @@ type Server struct {
 	//TLS设置
 	Server_Cert_Path string `json:"server_cert_path,omitempty" jsonschema:"description=使用TLS时服务端的证书位置"`
 	Server_Key_Path  string `json:"server_key_path,omitempty" jsonschema:"description=使用TLS时服务端证书的私钥位置"`
-	Ca_Cert_Path     string `json:"ca_cert_path,omitempty" jsonschema:"description=使用TLS时根证书位置"`
+	Ca_Cert_Path     string `json:"ca_cert_path,omitempty" jsonschema:"description=使用TLS时根整数位置"`
 	Client_Crl_Path  string `json:"client_crl_path,omitempty" jsonschema:"description=客户端证书黑名单位置"`
 
 	//使用XDS
-	XDS                  bool `json:"xds,omitempty" jsonschema:"description=是否使用xDSAPIs"`
-	XDS_CREDS            bool `json:"xds_creds,omitempty" jsonschema:"description=是否使用xDSAPIs来接收TLS设置"`
+	XDS       bool `json:"xds,omitempty" jsonschema:"description=是否使用xDSAPIs"`
+	XDS_CREDS bool `json:"xds_creds,omitempty" jsonschema:"description=是否使用xDSAPIs来接收TLS设置"`
 	XDS_Maintenance_Port int  `json:"xds_maintenance_port,omitempty" jsonschema:"description=maintenance服务的端口如果不设置则使用当前服务端口+1"`
 
 	// 调试,目前admin接口不稳定,因此只使用channelz
@@ -87,19 +73,13 @@ type Server struct {
 
 	UnaryInterceptors  []grpc.UnaryServerInterceptor  `json:"-" jsonschema:"nullable"`
 	StreamInterceptors []grpc.StreamServerInterceptor `json:"-" jsonschema:"nullable"`
-
-	//使用grpc-gateway
-	Use_Gateway              bool   `json:"use_gateway,omitempty" jsonschema:"description=是否使用grpc-gateway提供restful接口"`
-	Gateway_Use_TLS          bool   `json:"gateway_use_tls,omitempty" jsonschema:"description=grpc-gateway是否使用TLS以启动https服务"`
-	Gateway_Client_Cert_Path string `json:"gateway_client_cert_path,omitempty" jsonschema:"description=指定gateway访问grpc的客户端证书当XDS_CREDS或设置了TLS设置时生效"`
-	Gateway_Client_Key_Path  string `json:"gateway_client_key_path,omitempty" jsonschema:"description=指定gateway访问grpc的客户端证书对应的私钥位置"`
 	/**
 	在这里补充其他配置项(注意去掉注释)
 	*/
 
 	{{ serv_name }}_pb.Unimplemented{{ serv_name | upper }}Server `json:"-"`
-	opts                                        []grpc.ServerOption
-	healthservice                               *health.Server
+	opts                                    []grpc.ServerOption
+	healthservice                           *health.Server
 }
 
 //Main 服务的入口函数
@@ -109,7 +89,7 @@ func (s *Server) Main() {
 		log.AddExtField("app_name", s.App_Name),
 		log.AddExtField("app_version", s.App_Version),
 	)
-	log.Info("grpc服务获得参数", log.Dict{"ServiceConfig": s})
+	log.Info("grpc服务获得参数",log.Dict{"ServiceConfig": s})
 	/**
 	在这里补充其他初始化项(注意去掉注释)
 	*/
@@ -198,12 +178,13 @@ func (s *Server) TLSOpts() {
 		}
 		s.opts = append(s.opts, grpc.Creds(creds))
 	}
-	log.Info("grpc server will start use TLS")
+	log.Info("server will start use TLS")
 }
 
 func doNothing() {
 	log.Debug("Do nothing")
 }
+
 
 //RegistTools 为指定服务注册各种工具
 func (s *Server) RegistTools(serv *grpc.Server) func() {
@@ -225,66 +206,6 @@ func (s *Server) RegistTools(serv *grpc.Server) func() {
 		return cleanup
 	}
 	return doNothing
-}
-
-//withLogger 记录gateway的工作log
-func withLogger(handler http.Handler) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		m := httpsnoop.CaptureMetrics(handler, writer, request)
-		log.Info("Http log", log.Dict{"code": m.Code, "duration": m.Duration, "Path": request.URL.Path})
-	})
-}
-
-//MakeGateway 构造grpc-gateway的http服务
-func (s *Server) MakeGateway(grpc_need_client_cert bool) *http.Server {
-	mux := runtime.NewServeMux()
-	// setting up a dail up for gRPC service by specifying endpoint/target url
-	creds := insecure.NewCredentials()
-	if grpc_need_client_cert {
-		if s.Ca_Cert_Path != "" {
-			if s.Gateway_Client_Cert_Path != "" && s.Gateway_Client_Key_Path != "" {
-				cert, err := tls.LoadX509KeyPair(s.Gateway_Client_Cert_Path, s.Gateway_Client_Key_Path)
-				if err != nil {
-					log.Error("read client pem file error:", log.Dict{"err": err.Error(), "Cert_path": s.Gateway_Client_Cert_Path, "Key_Path": s.Gateway_Client_Key_Path})
-					os.Exit(1)
-				}
-				capool := x509.NewCertPool()
-				caCrt, err := ioutil.ReadFile(s.Ca_Cert_Path)
-				if err != nil {
-					log.Error("read ca pem file error:", log.Dict{"err": err.Error(), "path": s.Ca_Cert_Path})
-					os.Exit(1)
-				}
-				capool.AppendCertsFromPEM(caCrt)
-				tlsconf := &tls.Config{
-					RootCAs:      capool,
-					Certificates: []tls.Certificate{cert},
-				}
-				creds = credentials.NewTLS(tlsconf)
-
-			} else {
-				var err error
-				creds, err = credentials.NewClientTLSFromFile(s.Ca_Cert_Path, "")
-				if err != nil {
-					log.Error("failed to load credentials", log.Dict{"err": err.Error()})
-					os.Exit(1)
-				}
-			}
-		}
-	}
-	err := {{ serv_name }}_pb.Register{{ serv_name | upper }}HandlerFromEndpoint(context.Background(), mux, s.Address, []grpc.DialOption{grpc.WithTransportCredentials(creds)})
-	if err != nil {
-		log.Error("Failed to Register GRPCHandlerFromEndpoint", log.Dict{"error": err})
-		os.Exit(1)
-	}
-
-	m := http.NewServeMux()
-	m.Handle("/swagger/", http.StripPrefix("/swagger", swaggerui.Handler(spec)))
-	m.Handle("/", withLogger(mux))
-	// Creating a normal HTTP server
-	server := http.Server{
-		Handler: m,
-	}
-	return &server
 }
 
 //RunXdsServer 启动xds服务服务
@@ -326,111 +247,38 @@ func (s *Server) RunXdsServer() {
 			log.Error("failed to create server-side xDS credentials", log.Dict{"error": err.Error()})
 			os.Exit(2)
 		}
-		log.Info("server will start use XDS_CREDS")
 	}
 	s.opts = append(s.opts, grpc.Creds(creds))
-
+	log.Info("server will start use XDS_CREDS")
 	gs := xds.NewGRPCServer(s.opts...)
 	defer gs.Stop()
 
 	// 注册服务
 	{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
 
-	if s.Use_Gateway {
-		var server *http.Server
-		if s.XDS_CREDS {
-			server = s.MakeGateway(true)
-		} else {
-			server = s.MakeGateway(false)
-		}
-		// 设置分流,http1走restful,http2走grpc
-		m := cmux.New(lis)
-
-		// a different listener for HTTP2 since gRPC uses HTTP2
-		grpcL := m.Match(cmux.HTTP2())
-		// a different listener for HTTP1
-		httpL := m.Match(cmux.HTTP1Fast())
-		// 构造gateway用户处理http请求
-
-		// 启动服务
-		log.Info("Server Start with RESTful and Grpc api and mantenance by XDS", log.Dict{"address": s.Address, "mantenance_port": mantenancePort})
-		go func() {
-			if s.Gateway_Use_TLS {
-				err := server.ServeTLS(httpL, s.Server_Cert_Path, s.Server_Key_Path)
-				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
-				}
-			} else {
-				err := server.Serve(httpL)
-				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
-				}
-			}
-		}()
-		go func() {
-			err := gs.Serve(grpcL)
-			if err != nil {
-				log.Error("Failed to Serve Grpc", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		go func() {
-			err := maintenanceServer.Serve(mantenanceLis)
-			if err != nil {
-				log.Error("Failed to Start Maintenance Server", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		go func() {
-			err := m.Serve()
-			if err != nil {
-				log.Error("Failed to Start cmux", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
-		quit := make(chan os.Signal, 3)
-		signal.Notify(quit, os.Interrupt)
-		<-quit
-		log.Info("Shutdown Server ...")
-		gs.GracefulStop()
-		maintenanceServer.GracefulStop()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = server.Shutdown(ctx)
+	// 启动服务
+	log.Info("Server Start", log.Dict{"address": s.Address, "mantenance_port": mantenancePort})
+	go func() {
+		err := gs.Serve(lis)
 		if err != nil {
-			log.Error("server shutdown error", log.Dict{"err": err.Error()})
-			os.Exit(2)
+			log.Error("Failed to Serve", log.Dict{"error": err})
+			os.Exit(1)
 		}
-		m.Close()
-		log.Info("Server Shutdown")
-	} else {
-		log.Info("Server Start with Grpc api and mantenance by XDS", log.Dict{"address": s.Address, "mantenance_port": mantenancePort})
-		go func() {
-			err := gs.Serve(lis)
-			if err != nil {
-				log.Error("Failed to Serve Grpc", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		go func() {
-			err := maintenanceServer.Serve(mantenanceLis)
-			if err != nil {
-				log.Error("Failed to Start Maintenance Server", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
-		quit := make(chan os.Signal, 3)
-		signal.Notify(quit, os.Interrupt)
-		<-quit
-		log.Info("Shutdown Server ...")
-		gs.GracefulStop()
-		maintenanceServer.GracefulStop()
-		log.Info("Server Shutdown")
-	}
+	}()
+	go func() {
+		err := maintenanceServer.Serve(mantenanceLis)
+		if err != nil {
+			log.Error("Failed to Start Maintenance Server", log.Dict{"error": err})
+			os.Exit(1)
+		}
+	}()
+	// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
+	quit := make(chan os.Signal, 3)
+	signal.Notify(quit, os.Interrupt)
+	<-quit
+	log.Info("Shutdown Server ...")
+	gs.GracefulStop()
+	maintenanceServer.GracefulStop()
 }
 
 //RunCommonServer 启动常规服务服务
@@ -440,7 +288,6 @@ func (s *Server) RunCommonServer() {
 		log.Error("Failed to Listen", log.Dict{"error": err.Error(), "address": s.Address})
 		os.Exit(1)
 	}
-
 	if s.Server_Cert_Path != "" && s.Server_Key_Path != "" {
 		s.TLSOpts()
 	}
@@ -452,89 +299,13 @@ func (s *Server) RunCommonServer() {
 	// 注册服务
 	{{ serv_name }}_pb.Register{{ serv_name | upper }}Server(gs, s)
 
-	if s.Use_Gateway {
-		var server *http.Server
-		if s.Server_Cert_Path != "" && s.Server_Key_Path != "" {
-			server = s.MakeGateway(true)
-		} else {
-			server = s.MakeGateway(false)
-		}
-		// 构造gateway用户处理http请求
-		// 设置分流,http1走restful,http2走grpc
-		m := cmux.New(lis)
-		// a different listener for HTTP2 since gRPC uses HTTP2
-		grpcL := m.Match(cmux.HTTP2())
-		// a different listener for HTTP1
-		httpL := m.Match(cmux.HTTP1Fast())
-		// 启动服务
-		log.Info("Server Start with RESTful and Grpc api", log.Dict{"address": s.Address})
-		go func() {
-			log.Info("Grpc Server Started")
-			err := gs.Serve(grpcL)
-			if err != nil {
-				log.Error("Failed to Serve Grpc", log.Dict{"error": err})
-				os.Exit(1)
-			}
-
-		}()
-		go func() {
-			if s.Gateway_Use_TLS {
-				err := server.ServeTLS(httpL, s.Server_Cert_Path, s.Server_Key_Path)
-				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
-				}
-			} else {
-				err := server.Serve(httpL)
-				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
-				}
-			}
-		}()
-
-		go func() {
-			err := m.Serve()
-			if err != nil {
-				log.Error("Failed to Start cmux", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
-		quit := make(chan os.Signal, 3)
-		signal.Notify(quit, os.Interrupt)
-		<-quit
-		log.Info("Shutdown Server ...")
-		gs.GracefulStop()
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err = server.Shutdown(ctx)
-		if err != nil {
-			log.Error("server shutdown error", log.Dict{"err": err.Error()})
-			os.Exit(2)
-		}
-		m.Close()
-		log.Info("Server Shutdown")
-
-	} else {
-		// 启动服务
-		log.Info("Server Start with Grpc api", log.Dict{"address": s.Address})
-		go func() {
-			err := gs.Serve(lis)
-			if err != nil {
-				log.Error("Failed to Serve Grpc", log.Dict{"error": err})
-				os.Exit(1)
-			}
-		}()
-		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
-		quit := make(chan os.Signal, 3)
-		signal.Notify(quit, os.Interrupt)
-		<-quit
-		log.Info("Shutdown Server ...")
-		gs.GracefulStop()
-		log.Info("Server Shutdown")
+	// 启动服务
+	log.Info("Server Start", log.Dict{"address": s.Address})
+	err = gs.Serve(lis)
+	if err != nil {
+		log.Error("Failed to Serve", log.Dict{"error": err})
+		os.Exit(1)
 	}
-
 }
 
 //RegistInterceptor 注册拦截器

@@ -469,7 +469,6 @@ func (s *Server) RunCommonServer() {
 		// 启动服务
 		log.Info("Server Start with RESTful and Grpc api", log.Dict{"address": s.Address})
 		go func() {
-			log.Info("Grpc Server Started")
 			err := gs.Serve(grpcL)
 			if err != nil {
 				log.Error("Failed to Serve Grpc", log.Dict{"error": err})

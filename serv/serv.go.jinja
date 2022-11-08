@@ -372,14 +372,18 @@ func (s *Server) RunXdsServer() {
 			if s.Gateway_Use_TLS {
 				err := server.ServeTLS(httpL, s.Server_Cert_Path, s.Server_Key_Path)
 				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
+					if err.Error() != "mux: server closed" {
+						log.Error("Failed to Serve Http", log.Dict{"error": err})
+						os.Exit(1)
+					}
 				}
 			} else {
 				err := server.Serve(httpL)
 				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
+					if err.Error() != "mux: server closed" {
+						log.Error("Failed to Serve Http", log.Dict{"error": err})
+						os.Exit(1)
+					}
 				}
 			}
 		}()
@@ -400,8 +404,10 @@ func (s *Server) RunXdsServer() {
 		go func() {
 			err := m.Serve()
 			if err != nil {
-				log.Error("Failed to Start cmux", log.Dict{"error": err})
-				os.Exit(1)
+				if !strings.Contains(err.Error(), "use of closed network connection") && err.Error() != "mux: server closed" {
+					log.Error("Failed to Start cmux", log.Dict{"error": err})
+					os.Exit(1)
+				}
 			}
 		}()
 		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）
@@ -494,14 +500,18 @@ func (s *Server) RunCommonServer() {
 			if s.Gateway_Use_TLS {
 				err := server.ServeTLS(httpL, s.Server_Cert_Path, s.Server_Key_Path)
 				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
+					if err.Error() != "mux: server closed" {
+						log.Error("Failed to Serve Http", log.Dict{"error": err})
+						os.Exit(1)
+					}
 				}
 			} else {
 				err := server.Serve(httpL)
 				if err != nil {
-					log.Error("Failed to Serve Http", log.Dict{"error": err})
-					os.Exit(1)
+					if err.Error() != "mux: server closed" {
+						log.Error("Failed to Serve Http", log.Dict{"error": err})
+						os.Exit(1)
+					}
 				}
 			}
 		}()
@@ -509,8 +519,10 @@ func (s *Server) RunCommonServer() {
 		go func() {
 			err := m.Serve()
 			if err != nil {
-				log.Error("Failed to Start cmux", log.Dict{"error": err})
-				os.Exit(1)
+				if !strings.Contains(err.Error(), "use of closed network connection") && err.Error() != "mux: server closed" {
+					log.Error("Failed to Start cmux", log.Dict{"error": err})
+					os.Exit(1)
+				}
 			}
 		}()
 		// 等待中断信号以优雅地关闭服务器（设置 3 秒的超时时间）

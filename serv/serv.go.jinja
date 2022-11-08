@@ -235,9 +235,23 @@ func withLogger(handler http.Handler) http.Handler {
 	})
 }
 
+
+func handleError(ctx context.Context, mux *runtime.ServeMux, marshaler runtime.Marshaler, writer http.ResponseWriter, request *http.Request, err error) {
+	var newError runtime.HTTPStatusError
+	newError = runtime.HTTPStatusError{
+				HTTPStatus: 500,
+				Err:        err,
+			}
+	// using default handler to do the rest of heavy lifting of marshaling error and adding headers
+	runtime.DefaultHTTPErrorHandler(ctx, mux, marshaler, writer, request, &newError)
+}
+
+
 //MakeGateway 构造grpc-gateway的http服务
 func (s *Server) MakeGateway(grpc_need_client_cert bool) *http.Server {
-	mux := runtime.NewServeMux()
+	mux := runtime.NewServeMux(
+		runtime.WithErrorHandler(handleError),
+	)
 	// setting up a dail up for gRPC service by specifying endpoint/target url
 	creds := insecure.NewCredentials()
 	if grpc_need_client_cert {
@@ -395,6 +409,7 @@ func (s *Server) RunXdsServer() {
 		signal.Notify(quit, os.Interrupt)
 		<-quit
 		log.Info("Shutdown Server ...")
+		m.Close()
 		gs.GracefulStop()
 		maintenanceServer.GracefulStop()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -404,7 +419,6 @@ func (s *Server) RunXdsServer() {
 			log.Error("server shutdown error", log.Dict{"err": err.Error()})
 			os.Exit(2)
 		}
-		m.Close()
 		log.Info("Server Shutdown")
 	} else {
 		log.Info("Server Start with Grpc api and mantenance by XDS", log.Dict{"address": s.Address, "mantenance_port": mantenancePort})
@@ -504,6 +518,7 @@ func (s *Server) RunCommonServer() {
 		signal.Notify(quit, os.Interrupt)
 		<-quit
 		log.Info("Shutdown Server ...")
+		m.Close()
 		gs.GracefulStop()
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -512,7 +527,6 @@ func (s *Server) RunCommonServer() {
 			log.Error("server shutdown error", log.Dict{"err": err.Error()})
 			os.Exit(2)
 		}
-		m.Close()
 		log.Info("Server Shutdown")
 
 	} else {
